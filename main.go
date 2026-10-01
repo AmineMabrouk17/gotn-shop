@@ -1,43 +1,49 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 
+	"github.com/AmineMabrouk17/gotn-shop/exporter"
+	"github.com/AmineMabrouk17/gotn-shop/model"
 	"github.com/AmineMabrouk17/gotn-shop/scraper"
 )
 
+type target struct {
+	scraper scraper.StoreScraper
+	url     string
+	pages   int
+}
+
 func main() {
 	fmt.Println("========================================")
-	fmt.Println("       gotn-shop: Tunisian Scraper      ")
+	fmt.Println("         gotn-shop: Store Scraper       ")
 	fmt.Println("========================================")
 
-	// Example category: Laptops (PC Portables)
-	targetURL := "https://www.tunisianet.com.tn/301-pc-portable-tunisie"
-	maxPages := 2 // Scrape first 2 pages
-
-	fmt.Printf("Scraping TunisiaNet (%s)...\n\n", targetURL)
-	products, err := scraper.ScrapeTunisiaNet(targetURL, maxPages)
-	if err != nil {
-		fmt.Println("Error scraping:", err)
-		return
+	// Each store is a StoreScraper, so adding one is a single line here.
+	targets := []target{
+		{scraper.NewTunisiaNet(), "https://www.tunisianet.com.tn/301-pc-portable-tunisie", 2},
+		{scraper.NewMBM(), "https://mbm-tn.com/145-pc-portable", 2},
 	}
 
-	fmt.Printf("\nDone! Collected %d products.\n", len(products))
+	var all []model.Product
 
-	// Save to JSON
-	fileData, err := json.MarshalIndent(products, "", "  ")
-	if err != nil {
-		fmt.Println("Error encoding JSON:", err)
-		return
+	for _, t := range targets {
+		fmt.Printf("\nFetching from %s (Pages: %d)...\n", t.scraper.Name(), t.pages)
+		products, err := t.scraper.Scrape(t.url, t.pages)
+		if err != nil {
+			fmt.Printf("  %s failed: %v\n", t.scraper.Name(), err)
+			continue
+		}
+		fmt.Printf("  %s: scraped %d products\n", t.scraper.Name(), len(products))
+		all = append(all, products...)
 	}
 
-	err = os.WriteFile("products.json", fileData, 0644)
-	if err != nil {
-		fmt.Println("Error saving file:", err)
+	fmt.Printf("\nTotal: %d products across %d stores.\n", len(all), len(targets))
+
+	csvFile := "products.csv"
+	if err := exporter.ExportToCSV(csvFile, all); err != nil {
+		fmt.Printf("Failed to export CSV: %v\n", err)
 		return
 	}
-
-	fmt.Println("Saved results to products.json!")
+	fmt.Printf("Exported results to %s\n", csvFile)
 }

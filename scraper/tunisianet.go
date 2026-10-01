@@ -9,16 +9,25 @@ import (
 	"github.com/gocolly/colly/v2"
 )
 
-func ScrapeTunisiaNet(categoryURL string, maxPages int) ([]model.Product, error) {
+type TunisiaNetScraper struct{}
+
+func NewTunisiaNet() *TunisiaNetScraper {
+	return &TunisiaNetScraper{}
+}
+
+func (s *TunisiaNetScraper) Name() string {
+	return "TunisiaNet"
+}
+
+func (s *TunisiaNetScraper) Scrape(url string, maxPages int) ([]model.Product, error) {
 	var products []model.Product
 	itemCounter := 1
 
 	c := colly.NewCollector(
-		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"),
+		colly.UserAgent("gotn-shop-bot/1.0 (+https://github.com/AmineMabrouk17/gotn-shop)"),
 		colly.AllowedDomains("www.tunisianet.com.tn", "tunisianet.com.tn"),
 	)
 
-	// Rate limiting: 1 second delay between requests
 	c.Limit(&colly.LimitRule{
 		DomainGlob:  "*tunisianet.*",
 		Parallelism: 1,
@@ -27,17 +36,22 @@ func ScrapeTunisiaNet(categoryURL string, maxPages int) ([]model.Product, error)
 
 	currentPage := 1
 
-	// Scrape each product card
 	c.OnHTML(".item-product", func(e *colly.HTMLElement) {
 		title := strings.TrimSpace(e.ChildText(".product-title a"))
-		// The card renders the price twice (desktop + mobile), so take only the
-		// first match instead of concatenating every match like ChildText does.
+		// Each card renders the price twice (desktop + mobile), so take only the
+		// first match. ChildText concatenates ALL matches, which yields
+		// "1 169,000 DT1 169,000 DT" and fails to parse as 0.
 		priceText := strings.TrimSpace(e.DOM.Find(".price").First().Text())
 		link := e.ChildAttr(".product-title a", "href")
-		// Stock lives in #stock_availability/.in-stock, not .product-availability.
+		img := e.ChildAttr(".thumbnail-container img", "data-full-size-image-url")
+		if img == "" {
+			img = e.ChildAttr(".thumbnail-container img", "src")
+		}
+		// Stock lives in #stock_availability / .in-stock on this theme; there is
+		// no .product-availability element, so matching it alone reports every
+		// product as in stock.
 		stockText := strings.ToLower(strings.TrimSpace(
 			e.DOM.Find(".product-availability, .in-stock, .out-of-stock, #stock_availability").First().Text()))
-
 		inStock := true
 		if stockText != "" {
 			for _, out := range []string{"épuisé", "epuise", "rupture", "hors stock", "indisponible", "non disponible", "out of stock"} {
@@ -51,10 +65,11 @@ func ScrapeTunisiaNet(categoryURL string, maxPages int) ([]model.Product, error)
 		if title != "" && priceText != "" {
 			products = append(products, model.Product{
 				ID:        itemCounter,
-				Store:     "TunisiaNet",
+				Store:     s.Name(),
 				Title:     title,
 				PriceText: priceText,
 				PriceTND:  model.CleanPrice(priceText),
+				Image:     img,
 				Link:      link,
 				InStock:   inStock,
 			})
@@ -62,26 +77,32 @@ func ScrapeTunisiaNet(categoryURL string, maxPages int) ([]model.Product, error)
 		}
 	})
 
-	// Handle pagination up to maxPages
 	c.OnHTML("a.next", func(e *colly.HTMLElement) {
 		if currentPage < maxPages {
 			nextURL := e.Attr("href")
 			if nextURL != "" {
 				currentPage++
-				fmt.Printf("--> Moving to page %d...\n", currentPage)
+				fmt.Printf("  -> page %d\n", currentPage)
 				e.Request.Visit(nextURL)
 			}
 		}
 	})
 
 	c.OnRequest(func(r *colly.Request) {
-		fmt.Printf("Fetching: %s\n", r.URL.String())
+		fmt.Printf("  fetching: %s\n", r.URL)
 	})
 
 	c.OnError(func(r *colly.Response, err error) {
-		fmt.Printf("Request URL: %s failed with response: %v\nError: %v\n", r.Request.URL, r, err)
+		status := 0
+		if r != nil {
+			status = r.StatusCode
+		}
+		fmt.Printf("  request failed (status %d): %v\n", status, err)
 	})
 
-	err := c.Visit(categoryURL)
+	if maxPages < 1 {
+		maxPages = 1
+	}
+	err := c.Visit(url)
 	return products, err
 }
