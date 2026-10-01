@@ -1,0 +1,15 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+gotn-shop
+
+# Output files
+*.json
+*.csv
+
+# OS files
+.DS_Store
+Thumbs.db
